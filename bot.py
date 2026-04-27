@@ -1,14 +1,13 @@
 import json
 import os
-import asyncio
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+import asyncio
+import threading
 
-# Flask для healthcheck (чтобы Render не ругался)
 app = Flask(__name__)
-
 DATA_FILE = "events.json"
 
 def load_data():
@@ -21,7 +20,7 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-# ------ ВСЯ ТВОЯ ЛОГИКА БОТА (та же, что была) ------
+# ----- БЛОК С ЛОГИКОЙ БОТА -----
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text=None):
     keyboard = [
         [InlineKeyboardButton("📅 Мои мероприятия", callback_data="list")],
@@ -193,15 +192,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await main_menu(update, context)
 
-# ------ Flask healthcheck для Render ------
-@app.route('/')
-@app.route('/health')
-def health():
-    return jsonify({"status": "alive"}), 200
-
-# Запуск бота и Flask вместе
+# ----- ЗАПУСК БОТА (современный способ для версии 20.x) -----
 async def run_bot():
-    # Токен из переменной окружения (безопасно!)
     TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not TOKEN:
         print("❌ Ошибка: переменная TELEGRAM_BOT_TOKEN не установлена")
@@ -213,25 +205,29 @@ async def run_bot():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    # Используем polling (для Render-free норм, главное чтобы был Flask)
+    print("✅ Бот запущен и работает!")
+    
+    # Запускаем polling (без Updater)
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
-    
-    print("✅ Бот запущен и работает!")
     
     # Держим бота активным
     while True:
         await asyncio.sleep(1)
 
+# ----- Flask healthcheck -----
+@app.route('/')
+@app.route('/health')
+def health():
+    return jsonify({"status": "alive"}), 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
 if __name__ == "__main__":
-    import threading
-    
-    # Запускаем Flask в отдельном потоке (для healthcheck)
-    def run_flask():
-        port = int(os.environ.get("PORT", 5000))
-        app.run(host="0.0.0.0", port=port)
-    
+    # Запускаем Flask в отдельном потоке
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
     
